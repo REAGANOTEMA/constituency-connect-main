@@ -1,15 +1,11 @@
-import { useState } from "react";
-import { Plus, Search, Download, Eye, Edit, Trash2 } from "lucide-react";
+// pages/projectsPage.tsx
+import { useState, useEffect } from "react";
+import { Plus, Search, Eye, Edit } from "lucide-react";
 import { UGANDAN_CONSTITUENCIES } from "@/data/ugandaData";
 
-const PROJECTS = [
-  { id: "PRJ-001", name: "Kireka Road Rehabilitation", category: "Infrastructure", constituency: "Kampala Central", budget: 250000000, spent: 180000000, progress: 72, status: "Active", start: "2024-03-01", end: "2025-06-30" },
-  { id: "PRJ-002", name: "Valley Dam Construction", category: "Water & Sanitation", constituency: "Mbarara Central", budget: 120000000, spent: 120000000, progress: 100, status: "Completed", start: "2024-01-01", end: "2024-12-31" },
-  { id: "PRJ-003", name: "St. Jude Primary School Block", category: "Education", constituency: "Gulu City East", budget: 320000000, spent: 144000000, progress: 45, status: "Active", start: "2024-06-01", end: "2025-12-31" },
-  { id: "PRJ-004", name: "Kiyanga Health Center Extension", category: "Health", constituency: "Mukono Municipal", budget: 150000000, spent: 132000000, progress: 88, status: "Active", start: "2024-04-01", end: "2025-04-30" },
-  { id: "PRJ-005", name: "Youth Skills Training Centre", category: "Youth", constituency: "Jinja East", budget: 80000000, spent: 0, progress: 0, status: "Planned", start: "2025-03-01", end: "2026-02-28" },
-  { id: "PRJ-006", name: "Market Stalls Renovation", category: "Economic", constituency: "Hoima East", budget: 45000000, spent: 15000000, progress: 33, status: "Active", start: "2024-09-01", end: "2025-03-31" },
-];
+// Firebase
+import { db } from "@/firebase";
+import { collection, getDocs, addDoc, Timestamp } from "firebase/firestore";
 
 const statusColors: Record<string, string> = {
   Active: "badge-progress",
@@ -34,27 +30,89 @@ function formatUGX(v: number) {
 }
 
 export default function ProjectsPage() {
+  const [projects, setProjects] = useState<any[]>([]);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("All");
   const [view, setView] = useState<"table" | "cards">("cards");
   const [showModal, setShowModal] = useState(false);
 
-  const filtered = PROJECTS.filter(p => {
-    const matchSearch = p.name.toLowerCase().includes(search.toLowerCase()) || p.constituency.toLowerCase().includes(search.toLowerCase());
+  const [newProject, setNewProject] = useState({
+    name: "",
+    category: "Infrastructure",
+    constituency: UGANDAN_CONSTITUENCIES[0]?.name || "",
+    budget: 0,
+    end: "",
+    description: "",
+  });
+
+  // Fetch projects from Firestore
+  useEffect(() => {
+    const fetchProjects = async () => {
+      const querySnapshot = await getDocs(collection(db, "projects"));
+      const fetched = querySnapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+      }));
+      setProjects(fetched);
+    };
+    fetchProjects();
+  }, []);
+
+  const filtered = projects.filter(p => {
+    const matchSearch =
+      p.name.toLowerCase().includes(search.toLowerCase()) ||
+      p.constituency.toLowerCase().includes(search.toLowerCase());
     const matchStatus = statusFilter === "All" || p.status === statusFilter;
     return matchSearch && matchStatus;
   });
 
+  // Create project
+  const handleCreateProject = async () => {
+    if (!newProject.name || !newProject.constituency || newProject.budget <= 0) return;
+
+    await addDoc(collection(db, "projects"), {
+      ...newProject,
+      spent: 0,
+      progress: 0,
+      status: "Planned",
+      start: Timestamp.now(),
+      end: Timestamp.fromDate(new Date(newProject.end)),
+    });
+
+    // Refresh projects
+    const querySnapshot = await getDocs(collection(db, "projects"));
+    const fetched = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    setProjects(fetched);
+
+    setShowModal(false);
+    setNewProject({
+      name: "",
+      category: "Infrastructure",
+      constituency: UGANDAN_CONSTITUENCIES[0]?.name || "",
+      budget: 0,
+      end: "",
+      description: "",
+    });
+  };
+
+  // Calculate stats
+  const totalBudget = projects.reduce((acc, p) => acc + (p.budget || 0), 0);
+  const activeCount = projects.filter(p => p.status === "Active").length;
+  const completedCount = projects.filter(p => p.status === "Completed").length;
+
   return (
     <div className="space-y-6">
+      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="font-display text-2xl font-bold text-foreground">Constituency Projects</h1>
           <p className="text-muted-foreground text-sm mt-1">Track and manage all constituency development projects</p>
         </div>
-        <button onClick={() => setShowModal(true)}
+        <button
+          onClick={() => setShowModal(true)}
           className="flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold transition-all"
-          style={{ background: "hsl(var(--primary))", color: "hsl(var(--primary-foreground))" }}>
+          style={{ background: "hsl(var(--primary))", color: "hsl(var(--primary-foreground))" }}
+        >
           <Plus size={16} /> New Project
         </button>
       </div>
@@ -62,10 +120,10 @@ export default function ProjectsPage() {
       {/* Stats */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         {[
-          { label: "Total Projects", value: 148, color: "text-foreground" },
-          { label: "Active", value: 87, color: "text-amber-600" },
-          { label: "Completed", value: 52, color: "text-green-600" },
-          { label: "Total Budget", value: "UGX 48B", color: "text-primary" },
+          { label: "Total Projects", value: projects.length, color: "text-foreground" },
+          { label: "Active", value: activeCount, color: "text-amber-600" },
+          { label: "Completed", value: completedCount, color: "text-green-600" },
+          { label: "Total Budget", value: formatUGX(totalBudget), color: "text-primary" },
         ].map(s => (
           <div key={s.label} className="gov-card p-4 text-center">
             <div className={`text-2xl font-bold font-display ${s.color}`}>{s.value}</div>
@@ -78,19 +136,35 @@ export default function ProjectsPage() {
       <div className="gov-card p-4 flex flex-wrap gap-3 items-center">
         <div className="relative flex-1 min-w-48">
           <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-          <input value={search} onChange={e => setSearch(e.target.value)}
+          <input
+            value={search}
+            onChange={e => setSearch(e.target.value)}
             className="pl-9 pr-4 h-9 w-full rounded-lg text-sm bg-muted border-0 focus:outline-none"
-            placeholder="Search projects..." />
+            placeholder="Search projects..."
+          />
         </div>
-        <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}
-          className="h-9 px-3 rounded-lg text-sm bg-muted border-0 focus:outline-none">
+        <select
+          value={statusFilter}
+          onChange={e => setStatusFilter(e.target.value)}
+          className="h-9 px-3 rounded-lg text-sm bg-muted border-0 focus:outline-none"
+        >
           {["All", "Active", "Completed", "Planned", "On Hold"].map(s => <option key={s}>{s}</option>)}
         </select>
         <div className="flex border rounded-lg overflow-hidden" style={{ borderColor: "hsl(var(--border))" }}>
-          <button onClick={() => setView("cards")} className={`px-3 py-1.5 text-xs font-medium transition-colors ${view === "cards" ? "text-primary-foreground" : "text-muted-foreground"}`}
-            style={view === "cards" ? { background: "hsl(var(--primary))" } : {}}>Cards</button>
-          <button onClick={() => setView("table")} className={`px-3 py-1.5 text-xs font-medium transition-colors ${view === "table" ? "text-primary-foreground" : "text-muted-foreground"}`}
-            style={view === "table" ? { background: "hsl(var(--primary))" } : {}}>Table</button>
+          <button
+            onClick={() => setView("cards")}
+            className={`px-3 py-1.5 text-xs font-medium transition-colors ${view === "cards" ? "text-primary-foreground" : "text-muted-foreground"}`}
+            style={view === "cards" ? { background: "hsl(var(--primary))" } : {}}
+          >
+            Cards
+          </button>
+          <button
+            onClick={() => setView("table")}
+            className={`px-3 py-1.5 text-xs font-medium transition-colors ${view === "table" ? "text-primary-foreground" : "text-muted-foreground"}`}
+            style={view === "table" ? { background: "hsl(var(--primary))" } : {}}
+          >
+            Table
+          </button>
         </div>
       </div>
 
@@ -107,45 +181,17 @@ export default function ProjectsPage() {
                 </div>
                 <span className={`text-xs px-2 py-0.5 rounded-full font-medium flex-shrink-0 ${statusColors[p.status]}`}>{p.status}</span>
               </div>
-
               <div className="space-y-2">
                 <div className="flex justify-between text-xs">
                   <span className="text-muted-foreground">Progress</span>
                   <span className="font-semibold text-foreground">{p.progress}%</span>
                 </div>
                 <div className="h-2 rounded-full bg-muted overflow-hidden">
-                  <div className="h-full rounded-full transition-all duration-700"
-                    style={{ width: `${p.progress}%`, background: p.progress === 100 ? "hsl(var(--success))" : "hsl(var(--primary))" }} />
+                  <div
+                    className="h-full rounded-full transition-all duration-700"
+                    style={{ width: `${p.progress}%`, background: p.progress === 100 ? "hsl(var(--success))" : "hsl(var(--primary))" }}
+                  />
                 </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3 text-xs">
-                <div>
-                  <p className="text-muted-foreground">Total Budget</p>
-                  <p className="font-semibold text-foreground">{formatUGX(p.budget)}</p>
-                </div>
-                <div>
-                  <p className="text-muted-foreground">Spent</p>
-                  <p className="font-semibold text-foreground">{formatUGX(p.spent)}</p>
-                </div>
-                <div>
-                  <p className="text-muted-foreground">Start</p>
-                  <p className="font-medium text-foreground">{p.start}</p>
-                </div>
-                <div>
-                  <p className="text-muted-foreground">End Date</p>
-                  <p className="font-medium text-foreground">{p.end}</p>
-                </div>
-              </div>
-
-              <div className="flex gap-2 pt-2 border-t border-border">
-                <button className="flex-1 flex items-center justify-center gap-1.5 h-8 rounded-lg text-xs font-medium bg-muted hover:bg-muted/80 transition-colors">
-                  <Eye size={13} /> View
-                </button>
-                <button className="flex-1 flex items-center justify-center gap-1.5 h-8 rounded-lg text-xs font-medium transition-all"
-                  style={{ background: "hsl(var(--primary) / 0.1)", color: "hsl(var(--primary))" }}>
-                  <Edit size={13} /> Edit
-                </button>
               </div>
             </div>
           ))}
@@ -208,43 +254,49 @@ export default function ProjectsPage() {
           <div className="bg-card rounded-2xl shadow-gov-lg w-full max-w-xl p-6 animate-slide-up">
             <h3 className="font-display text-xl font-bold text-foreground mb-5">Create New Project</h3>
             <div className="space-y-4">
-              <div>
-                <label className="text-sm font-medium mb-1.5 block">Project Name</label>
-                <input className="w-full h-10 px-3 rounded-lg border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/30" placeholder="Enter project name" />
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="text-sm font-medium mb-1.5 block">Category</label>
-                  <select className="w-full h-10 px-3 rounded-lg border bg-background text-sm focus:outline-none">
-                    {["Infrastructure", "Education", "Health", "Water & Sanitation", "Youth", "Economic"].map(c => <option key={c}>{c}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="text-sm font-medium mb-1.5 block">Constituency</label>
-                  <select className="w-full h-10 px-3 rounded-lg border bg-background text-sm focus:outline-none">
-                    {UGANDAN_CONSTITUENCIES.slice(0, 20).map(c => <option key={c.id}>{c.name}</option>)}
-                  </select>
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="text-sm font-medium mb-1.5 block">Budget (UGX)</label>
-                  <input type="number" className="w-full h-10 px-3 rounded-lg border bg-background text-sm focus:outline-none" placeholder="e.g. 250000000" />
-                </div>
-                <div>
-                  <label className="text-sm font-medium mb-1.5 block">End Date</label>
-                  <input type="date" className="w-full h-10 px-3 rounded-lg border bg-background text-sm focus:outline-none" />
-                </div>
-              </div>
-              <div>
-                <label className="text-sm font-medium mb-1.5 block">Description</label>
-                <textarea className="w-full px-3 py-2 rounded-lg border bg-background text-sm focus:outline-none resize-none" rows={3} placeholder="Project description..." />
-              </div>
+              <input
+                placeholder="Project Name"
+                value={newProject.name}
+                onChange={e => setNewProject({ ...newProject, name: e.target.value })}
+                className="w-full h-10 px-3 rounded-lg border bg-background text-sm focus:outline-none"
+              />
+              <select
+                value={newProject.category}
+                onChange={e => setNewProject({ ...newProject, category: e.target.value })}
+                className="w-full h-10 px-3 rounded-lg border bg-background text-sm"
+              >
+                {["Infrastructure", "Education", "Health", "Water & Sanitation", "Youth", "Economic"].map(c => <option key={c}>{c}</option>)}
+              </select>
+              <select
+                value={newProject.constituency}
+                onChange={e => setNewProject({ ...newProject, constituency: e.target.value })}
+                className="w-full h-10 px-3 rounded-lg border bg-background text-sm"
+              >
+                {UGANDAN_CONSTITUENCIES.map(c => <option key={c.id}>{c.name}</option>)}
+              </select>
+              <input
+                type="number"
+                placeholder="Budget"
+                value={newProject.budget}
+                onChange={e => setNewProject({ ...newProject, budget: Number(e.target.value) })}
+                className="w-full h-10 px-3 rounded-lg border bg-background text-sm"
+              />
+              <input
+                type="date"
+                value={newProject.end}
+                onChange={e => setNewProject({ ...newProject, end: e.target.value })}
+                className="w-full h-10 px-3 rounded-lg border bg-background text-sm"
+              />
+              <textarea
+                placeholder="Description"
+                value={newProject.description}
+                onChange={e => setNewProject({ ...newProject, description: e.target.value })}
+                className="w-full px-3 py-2 rounded-lg border bg-background text-sm"
+              />
             </div>
             <div className="flex gap-3 mt-6">
-              <button onClick={() => setShowModal(false)} className="flex-1 h-10 rounded-lg border text-sm font-medium hover:bg-muted transition-colors">Cancel</button>
-              <button onClick={() => setShowModal(false)} className="flex-1 h-10 rounded-lg text-sm font-semibold transition-all"
-                style={{ background: "hsl(var(--primary))", color: "hsl(var(--primary-foreground))" }}>
+              <button onClick={() => setShowModal(false)} className="flex-1 h-10 rounded-lg border text-sm">Cancel</button>
+              <button onClick={handleCreateProject} className="flex-1 h-10 rounded-lg text-sm font-semibold" style={{ background: "hsl(var(--primary))", color: "hsl(var(--primary-foreground))" }}>
                 Create Project
               </button>
             </div>
